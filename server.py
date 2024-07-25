@@ -6,20 +6,19 @@ HOST = '127.0.0.1'
 PORT = 12345
 
 # Dizionario delle stanze, con i nomi delle stanze come chiavi e liste di client come valori
-chatrooms = {'general': []}
+rooms = {'general': []}
 # Dizionario dei client connessi, con i socket come chiavi e user name come valori
 clients = {}
 usernames = set()
 
 # Funzione per inviare messaggi a tutti i client in una stanza
-def broadcast(message, chatroom, sender_socket):
-    for client in chatrooms[chatroom]:
-        if client != sender_socket:
-            try:
-                client.send(message)
-            except:
-                client.close()
-                chatrooms[chatroom].remove(client)
+def broadcast(message, room, sender_socket):
+    for client in rooms[room]:
+        try:
+            client.send(message)
+        except:
+            client.close()
+            rooms[room].remove(client)
 
 # Funzione per gestire i client
 def handle_client(client_socket):
@@ -37,23 +36,22 @@ def handle_client(client_socket):
         
         # Unisci il client alla stanza 'general'
         current_room = 'general'
-        chatrooms[current_room].append(client_socket)
+        rooms[current_room].append(client_socket)
         client_socket.send(f"JOINED {current_room}".encode('utf-8'))
-        
+        broadcast(f"{username} è entrato nella stanza {current_room}".encode('utf-8'), current_room, client_socket)
+
         while True:
             try:
                 message = client_socket.recv(1024).decode('utf-8')
                 if message:
-                    if message.startswith('/join '):
-                        new_chatroom = message.split()[1]
-                        if new_chatroom not in chatrooms:
-                            chatrooms[new_chatroom] = []
-                        chatrooms[current_room].remove(client_socket)
-                        chatrooms[new_chatroom].append(client_socket)
-                        current_room = new_chatroom
-                        client_socket.send(f"JOINED {current_room}".encode('utf-8'))
-                    else:
-                        broadcast(f"{clients[client_socket]}: {message}".encode('utf-8'), current_room, client_socket)
+                    # Parsing del messaggio con un dizionario di funzioni
+                    command, *args = message.split(' ', 1)
+                    switcher = {
+                        '/join': join_room,
+                        '/create': create_room,
+                        'default': default_message
+                    }
+                    switcher.get(command, switcher['default'])(client_socket, args, current_room)
                 else:
                     break
             except:
@@ -62,12 +60,41 @@ def handle_client(client_socket):
         print(f"Errore nel gestire il client: {e}")
     finally:
         if client_socket in clients:
-            usernames.remove(clients[client_socket])
+            username = clients[client_socket]
+            usernames.remove(username)
             del clients[client_socket]
-        for room in chatrooms.values():
-            if client_socket in room:
-                room.remove(client_socket)
+            for room in rooms.values():
+                if client_socket in room:
+                    room.remove(client_socket)
+                    broadcast(f"{username} ha lasciato la chat.".encode('utf-8'), room, None)
         client_socket.close()
+
+def join_room(client_socket, args, current_room):
+    username = clients[client_socket]
+    new_room = args[0] if args else 'general'
+    if new_room not in rooms:
+        rooms[new_room] = []
+    rooms[current_room].remove(client_socket)
+    rooms[new_room].append(client_socket)
+    current_room = new_room
+    client_socket.send(f"JOINED {current_room}".encode('utf-8'))
+    broadcast(f"{username} è entrato nella stanza {current_room}".encode('utf-8'), current_room, client_socket)
+
+def create_room(client_socket, args, current_room):
+    username = clients[client_socket]
+    new_room = args[0] if args else 'general'
+    if new_room not in rooms:
+        rooms[new_room] = []
+    rooms[current_room].remove(client_socket)
+    rooms[new_room].append(client_socket)
+    current_room = new_room
+    client_socket.send(f"CREATED {new_room} AND JOINED {current_room}".encode('utf-8'))
+    broadcast(f"{username} ha creato e si è unito alla stanza {current_room}".encode('utf-8'), current_room, client_socket)
+
+def default_message(client_socket, args, current_room):
+    username = clients[client_socket]
+    message = ' '.join(args)
+    broadcast(f"{username}: {message}".encode('utf-8'), current_room, client_socket)
 
 # Funzione principale del server
 def server():

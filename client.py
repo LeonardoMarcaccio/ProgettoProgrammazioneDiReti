@@ -32,7 +32,7 @@ def client():
             username = input("Inserisci il tuo username: ")
             client_socket.send(username.encode('utf-8'))
             response = client_socket.recv(1024).decode('utf-8')
-            if response == "JOINED general":
+            if response.startswith("JOINED general"):
                 print(f"Sei entrato nella stanza 'general' come {username}.")
                 break
             elif response == "INVALID_USERNAME":
