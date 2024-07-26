@@ -1,123 +1,69 @@
-import socket
-import threading
+#!/usr/bin/env python3
+"""Script Python per la realizzazione di un Server multithread
+per connessioni CHAT asincrone.
+Corso di Programmazione di Reti - Università di Bologna"""
 
-# Impostazioni del server
-HOST = '127.0.0.1'
-PORT = 12345
+from socket import AF_INET, socket, SOCK_STREAM
+from threading import Thread
 
-# Dizionario delle stanze, con i nomi delle stanze come chiavi e liste di client come valori
-rooms = {'general': []}
-# Dizionario dei client connessi, con i socket come chiavi e user name come valori
-clients = {}
-usernames = set()
+""" La funzione che segue accetta le connessioni  dei client in entrata."""
+def accetta_connessioni_in_entrata():
+    while True:
+        client, client_address = SERVER.accept()
+        print("%s:%s si è collegato." % client_address)
+        #al client che si connette per la prima volta fornisce alcune indicazioni di utilizzo
+        client.send(bytes("Salve! Digita il tuo Nome seguito dal tasto Invio!", "utf8"))
+        # ci serviamo di un dizionario per registrare i client
+        indirizzi[client] = client_address
+        #diamo inizio all'attività del Thread - uno per ciascun client
+        Thread(target=gestice_client, args=(client,)).start()
+        
 
-# Funzione per inviare messaggi a tutti i client in una stanza
-def broadcast(message, room, sender_socket):
-    for client in rooms[room]:
-        try:
-            client.send(message)
-        except:
+"""La funzione seguente gestisce la connessione di un singolo client."""
+def gestice_client(client):  # Prende il socket del client come argomento della funzione.
+    nome = client.recv(BUFSIZ).decode("utf8")
+    #da il benvenuto al client e gli indica come fare per uscire dalla chat quando ha terminato
+    benvenuto = 'Benvenuto %s! Se vuoi lasciare la Chat, scrivi {quit} per uscire.' % nome
+    client.send(bytes(benvenuto, "utf8"))
+    msg = "%s si è unito all chat!" % nome
+    #messaggio in broadcast con cui vengono avvisati tutti i client connessi che l'utente x è entrato
+    broadcast(bytes(msg, "utf8"))
+    #aggiorna il dizionario clients creato all'inizio
+    clients[client] = nome
+    
+#si mette in ascolto del thread del singolo client e ne gestisce l'invio dei messaggi o l'uscita dalla Chat
+    while True:
+        msg = client.recv(BUFSIZ)
+        if msg != bytes("{quit}", "utf8"):
+            broadcast(msg, nome+": ")
+        else:
+            client.send(bytes("{quit}", "utf8"))
             client.close()
-            rooms[room].remove(client)
+            del clients[client]
+            broadcast(bytes("%s ha abbandonato la Chat." % nome, "utf8"))
+            break
 
-# Funzione per gestire i client
-def handle_client(client_socket):
-    try:
-        # Richiedi l'user name e verifica la sua unicità
-        while True:
-            client_socket.send("USERNAME".encode('utf-8'))
-            username = client_socket.recv(1024).decode('utf-8')
-            if username and username not in usernames:
-                usernames.add(username)
-                clients[client_socket] = username
-                break
-            else:
-                client_socket.send("INVALID_USERNAME".encode('utf-8'))
+""" La funzione, che segue, invia un messaggio in broadcast a tutti i client."""
+def broadcast(msg, prefisso=""):  # il prefisso è usato per l'identificazione del nome.
+    for utente in clients:
+        utente.send(bytes(prefisso, "utf8")+msg)
+
         
-        # Unisci il client alla stanza 'general'
-        current_room = 'general'
-        rooms[current_room].append(client_socket)
-        client_socket.send(f"JOINED {current_room}".encode('utf-8'))
-        broadcast(f"{username} è entrato nella stanza {current_room}".encode('utf-8'), current_room, client_socket)
+clients = {}
+indirizzi = {}
 
-        while True:
-            try:
-                message = client_socket.recv(1024).decode('utf-8')
-                if message:
-                    # Parsing del messaggio con un dizionario di funzioni
-                    command, *args = message.split(' ', 1)
-                    switcher = {
-                        '/join': join_room,
-                        '/create': create_room,
-                        'default': default_message
-                    }
-                    switcher.get(command, switcher['default'])(client_socket, args, current_room)
-                else:
-                    break
-            except:
-                break
-    except Exception as e:
-        print(f"Errore nel gestire il client: {e}")
-    finally:
-        if client_socket in clients:
-            username = clients[client_socket]
-            usernames.remove(username)
-            del clients[client_socket]
-            for room in rooms.values():
-                if client_socket in room:
-                    room.remove(client_socket)
-                    broadcast(f"{username} ha lasciato la chat.".encode('utf-8'), room, None)
-        client_socket.close()
+HOST = "localhost"
+PORT = 53000
+BUFSIZ = 1024
+ADDR = (HOST, PORT)
 
-def join_room(client_socket, args, current_room):
-    username = clients[client_socket]
-    new_room = args[0] if args else 'general'
-    if new_room not in rooms:
-        rooms[new_room] = []
-    rooms[current_room].remove(client_socket)
-    rooms[new_room].append(client_socket)
-    current_room = new_room
-    client_socket.send(f"JOINED {current_room}".encode('utf-8'))
-    broadcast(f"{username} è entrato nella stanza {current_room}".encode('utf-8'), current_room, client_socket)
-
-def create_room(client_socket, args, current_room):
-    username = clients[client_socket]
-    new_room = args[0] if args else 'general'
-    if new_room not in rooms:
-        rooms[new_room] = []
-    rooms[current_room].remove(client_socket)
-    rooms[new_room].append(client_socket)
-    current_room = new_room
-    client_socket.send(f"CREATED {new_room} AND JOINED {current_room}".encode('utf-8'))
-    broadcast(f"{username} ha creato e si è unito alla stanza {current_room}".encode('utf-8'), current_room, client_socket)
-
-def default_message(client_socket, args, current_room):
-    username = clients[client_socket]
-    message = ' '.join(args)
-    broadcast(f"{username}: {message}".encode('utf-8'), current_room, client_socket)
-
-# Funzione principale del server
-def server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        server_socket.bind((HOST, PORT))
-        server_socket.listen()
-        print(f"Server avviato su {HOST}:{PORT}")
-        
-        while True:
-            try:
-                client_socket, client_address = server_socket.accept()
-                print(f"Connessione accettata da {client_address}")
-
-                # Avvia un nuovo thread per gestire il client
-                thread = threading.Thread(target=handle_client, args=(client_socket,))
-                thread.start()
-            except Exception as e:
-                print(f"Errore nell'accettare connessioni: {e}")
-    except Exception as e:
-        print(f"Errore nell'avviare il server: {e}")
-    finally:
-        server_socket.close()
+SERVER = socket(AF_INET, SOCK_STREAM)
+SERVER.bind(ADDR)
 
 if __name__ == "__main__":
-    server()
+    SERVER.listen(5)
+    print("In attesa di connessioni...")
+    ACCEPT_THREAD = Thread(target=accetta_connessioni_in_entrata)
+    ACCEPT_THREAD.start()
+    ACCEPT_THREAD.join()
+    SERVER.close()
