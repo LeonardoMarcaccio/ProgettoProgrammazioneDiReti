@@ -3,38 +3,52 @@
 from socket import AF_INET, socket, SOCK_STREAM
 from threading import Thread
 import tkinter as tkt
+import sys
+import package
+import json
 
 """La funzione che segue ha il compito di gestire la ricezione dei messaggi."""
 def receive():
-    while True:
+    while exit_flag == False:
         try:
-            #Quando viene chiamata la funzione receive, si mette in ascolto dei messaggi che arrivano sul socket
-            msg = client_socket.recv(BUFSIZ).decode("utf8")
-            #Visualizziamo l'elenco dei messaggi sullo schermo e facciamo in modo che il cursore sia visibile al termine degli stessi
-            msg_list.insert(tkt.END, msg)
-            #Nel caso di errore e' probabile che il client abbia abbandonato la chat.
-        except OSError:  
+            incoming_package = package.Package.fromJSON(client_socket.recv(BUFSIZ).decode("utf8"))
+            if incoming_package:
+                if isinstance(incoming_package, package.Package):
+                    match incoming_package.code:
+                        case "Message":
+                            msg_list.insert(tkt.END, incoming_package.content)
+                        case "Update":
+                            msg_list.delete(0,tkt.END)
+                            finestra.title(incoming_package.content["Room Name"])
+                        case "Quit":
+                            shut()
+        except OSError:
             break
 
 """La funzione che segue gestisce l'invio dei messaggi."""
 def send(event=None):
-    #Gli eventi vengono passati dai binders.
     msg = my_msg.get()
-    #libera la casella di input.
     my_msg.set("")
-    #Invia il messaggio sul socket
-    client_socket.send(bytes(msg, "utf8"))
-    if msg == "{quit}":
-        client_socket.close()
-        finestra.quit()
+    if(msg):
+        upload_package = package.Package("Message", msg)
+        client_socket.send(upload_package.toJSON().encode("utf8"))
+
+def shut():
+    finestra.destroy()
+    exit_flag = True
+    sys.exit()
 
 """La funzione che segue viene invocata quando viene chiusa la finestra della chat."""
 def on_closing(event=None):
-    my_msg.set("{quit}")
+    my_msg.set("/quit")
     send()
 
+exit_flag = False
+
 finestra = tkt.Tk()
-finestra.title("Chat_Laboratorio")
+finestra.withdraw()
+finestra.resizable(True, True)
+finestra.title("General")
 
 #creiamo il Frame per contenere i messaggi
 messages_frame = tkt.Frame(finestra)
@@ -46,7 +60,13 @@ my_msg.set("Scrivi qui i tuoi messaggi.")
 scrollbar = tkt.Scrollbar(messages_frame)
 
 # La parte seguente contiene i messaggi.
-msg_list = tkt.Listbox(messages_frame, height=15, width=50, yscrollcommand=scrollbar.set)
+msg_list = tkt.Listbox(
+    messages_frame,
+    height=30,
+    width=150,
+    xscrollcommand=scrollbar.set,
+    yscrollcommand=scrollbar.set
+)
 scrollbar.pack(side=tkt.RIGHT, fill=tkt.Y)
 msg_list.pack(side=tkt.LEFT, fill=tkt.BOTH)
 msg_list.pack()
@@ -80,7 +100,12 @@ BUFSIZ = 1024
 ADDR = (HOST, PORT)
 
 client_socket = socket(AF_INET, SOCK_STREAM)
-client_socket.connect(ADDR)
+try:
+    client_socket.connect(ADDR)
+except Exception as e:
+    print("Tenstativo di connessione fallito, riavviare il client ed inserire correttamente i dati relativi al server")
+
+finestra.deiconify()
 
 receive_thread = Thread(target=receive)
 receive_thread.start()
