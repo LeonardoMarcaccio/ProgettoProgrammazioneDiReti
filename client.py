@@ -103,7 +103,8 @@ client_socket = socket(AF_INET, SOCK_STREAM)
 try:
     client_socket.connect(ADDR)
 except Exception as e:
-    print("Tenstativo di connessione fallito, riavviare il client ed inserire correttamente i dati relativi al server")
+    shut()
+    print("Tentativo di connessione fallito, riavviare il client ed inserire correttamente i dati relativi al server")
 
 finestra.deiconify()
 
